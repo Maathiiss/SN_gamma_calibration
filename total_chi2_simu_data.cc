@@ -117,11 +117,12 @@ std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values){
 
 
 void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
-  TFile *fout = new TFile("chi2_results.root", "RECREATE");
+ TFile *fout = new TFile("chi2_results.root", "RECREATE");
   TTree *tree = new TTree("results", "Chi2 comparison results");
   int om=0;
   double chi2=0.0, gain=0.0, hand_chi2=0.0, bin_chi2=0.0;
   TH1D* h_ref1;
+  TH1D* h_simu_chi2;
   tree->Branch("om", &om);
   tree->Branch("chi2", &chi2);
   tree->Branch("hand_chi2", &hand_chi2);
@@ -129,52 +130,55 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
   tree->Branch("gain", &gain);
 
   TFile *f = TFile::Open("save_simu_spectra.root");
-  
-  for (int i = 0; i < 712; i++) {
+
+  for (int i = 0; i < 712; i++) {// loop on OMs
     om = i;
     TH1D* h_ref = data[i];
     if (!h_ref) continue;
     if(h_ref->GetEntries() == 0) continue;
-    for (int j = 0; j < nb_gain_values; j++) {
+    for(int k=1; k<16; k++){//16 is because we want to supress 150 keV = 15 bins bc 200 bins = 2MeV
+      h_ref->SetBinContent(k, 0);
+    }
+    TH1D* h_ref1 = new TH1D(Form("h_ref1_%d",i),"Data rebinned",200,0,2);
+    h_ref1->SetDirectory(0);
+    //project histo charge data in energy range
+    for(int k=1; k<=200; k++){
+      double bin_content = h_ref->GetBinContent(k);
+      h_ref1->SetBinContent(k, bin_content);
+    }
+    for (int j = 0; j < nb_gain_values; j++) {//loop on gain values
       chi2=0.0;
       hand_chi2=0.0;
       bin_chi2=0.0;
       gain = 0.5+1.0*j/nb_gain_values;
-      cout<<"om = "<<i<<" gain = "<<gain<<endl;
-      //TH1D* h_simu = simu[i][j];
       TH1D* h_simu = (TH1D*)f->Get(Form("om_%d_gain_%d", i, j));
       if (!h_simu) continue;
       int data_entries = h_ref->GetEntries();
       if(data_entries==0){continue;}
-      //remove the first bins because it is too close from amplitude threshold (200 bins for 2 MeV -> 15bins = 0.15 MeV = 150keV)
       for(int k=1; k<16; k++){
-	h_ref->SetBinContent(k, 0);
-	h_simu->SetBinContent(k, 0);
+        h_simu->SetBinContent(k, 0);
       }
-      // we normalise simu on data 
-      h_ref1 = new TH1D("h_ref1", "Data rebinned to simu 1", 200, 0, 2);
+      TH1D* h_simu_chi2 = new TH1D(Form("h_simu_%d_%d",i,j),"Simu rebinned",200,0,2);
+      h_simu_chi2->SetDirectory(0);
       int simu_entries = h_simu->GetEntries();
       if(simu_entries==0){continue;}
-      //condition minimum 50keV data and simu
       double sum_data = 0;
       double sum_simu = 0;
-      for(int k = 0; k <= 200; k++){
-	sum_data += h_ref->GetBinContent(k);
-	sum_simu += h_simu->GetBinContent(k);
+      for(int k = 1; k <= 200; k++){
+        sum_data += h_ref->GetBinContent(k);
+        sum_simu += h_simu->GetBinContent(k);
       }
-      for(int k=1; k<=200;k++){
-	double bin_content = h_ref->GetBinContent(k) * (1.0 * sum_simu / sum_data);
-	h_ref1->SetBinContent(k,bin_content);
+      for(int k=1; k<=200;k++){//normalised simu on data
+        double bin_content_simu = h_simu->GetBinContent(k) * (1.0 * sum_data / sum_simu);
+        h_simu_chi2->SetBinContent(k,bin_content_simu);
       }
-
-
       
       //chi2 by hand
       double s_data=0;
       double s_simu=0;
       for(int k=1; k<=200; k++){
         double d = h_ref1->GetBinContent(k);
-        double s = h_simu->GetBinContent(k);
+        double s = h_simu_chi2->GetBinContent(k);
 	s_simu+=s;
 	s_data+=d;
         if(s>0 && d>0){
@@ -182,23 +186,22 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
           bin_chi2 += 2*(s-d+d*log(d/s));
 	}
       }
-      cout<<s_data<<" "<<s_simu<<endl;
-      chi2 = h_ref1->Chi2Test(h_simu, "CHI2 UU");
+      chi2 = h_ref1->Chi2Test(h_simu_chi2, "CHI2 UU");
       //Draw part
-      if(i<10){
-	TCanvas* canvas = new TCanvas();
-	canvas->cd();
-	h_ref1->SetLineColor(kRed);
-	h_ref1->Draw();
-	h_simu->SetLineColor(kBlue);
-	h_simu->Draw("same");
-	canvas->SetLogy();
-	canvas->SaveAs(Form("png_fit_save/om_%d_gain_%f.png",i,gain));
-      }
+      // if(i<10){
+      // 	TCanvas* canvas = new TCanvas();
+      // 	canvas->cd();
+      // 	h_ref1->SetLineColor(kRed);
+      // 	h_ref1->Draw();
+      // 	h_simu_chi2->SetLineColor(kBlue);
+      // 	h_simu_chi2->Draw("same");
+      // 	canvas->SetLogy();
+      // 	canvas->SaveAs(Form("png_fit_save/om_%d_gain_%f.png",i,gain));
+      // }
       tree->Fill();
+      delete h_simu_chi2;
     }//end j simu gain                                                                               
     delete h_ref1;
-    h_ref1 = nullptr;
   }//end i om
   fout->cd();
   tree->Write();
@@ -206,43 +209,50 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
 }
 
 
-
-void extract_gain_values(){
-  float fit_range = 0.2; //to adjust
-  TFile *fin = TFile::Open("chi2_results.root", "READ");
-  TTree *tree = (TTree*)fin->Get("results");
-  int om;
-  double chi2, hand_chi2, bin_chi2, gain;
-
-  tree->SetBranchAddress("om", &om);
-  tree->SetBranchAddress("chi2", &chi2);
-  tree->SetBranchAddress("gain", &gain);
-
-  std::vector<TH2D*> histograms;
-  for(int i=0; i<712; i++){
-    histograms.push_back(new TH2D(Form("om_%d",i), Form("om_%d",i), 200, 0, 0, 200, 0, 0));
-  }
-  for(Long64_t i=0; i<tree->GetEntries(); ++i){
-    tree->GetEntry(i);
-    histograms[om]->Fill(chi2, gain);
-  }
-  for(int i=0; i<712; i++){
-    TH2D* h2 = histograms[i];
-    // to compute min chi2
-    TH1D* h1 = h2->ProjectionX(Form("proj_chi2_om_%d",i));
-    int bin_min = h1->GetMinimumBin();
-    double chi2_min = h1->GetBinCenter(bin_min);
-    double fit_low  = chi2_min - fit_range;
-    double fit_high = chi2_min + fit_range;
-    TF1* fit = new TF1(Form("fit_om_%d",i),"pol2",fit_low, fit_high);
-    h1->Fit(fit,"RQ");
-    TCanvas* canvas = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800, 600);
-    h1->Draw("APL");
-    fit->Draw("same");
-    canvas->SaveAs(Form("extract_values_png/om_%d.png",i));
-  }
-  fin->Close();
+void extract_gain_value(){
+    float fit_range = 0.1;
+    TFile *fin = TFile::Open("chi2_results.root", "READ");
+    TTree *tree = (TTree*)fin->Get("results");
+    int om;
+    double chi2, gain;
+    tree->SetBranchAddress("om", &om);
+    tree->SetBranchAddress("chi2", &chi2);
+    tree->SetBranchAddress("gain", &gain);
+    std::map<int, std::vector<std::pair<double,double>>> points_map;
+    std::map<int, double> min_chi2_map;
+    std::map<int, double> min_gain_map;
+    for(Long64_t i=0; i<tree->GetEntries(); ++i){
+        tree->GetEntry(i);
+        points_map[om].emplace_back(gain, chi2);
+        if(min_chi2_map.find(om) == min_chi2_map.end() || chi2 < min_chi2_map[om]){
+            min_chi2_map[om] = chi2;
+            min_gain_map[om] = gain;
+        }
+    }
+    for(int i=0; i<712; i++){
+        auto &points = points_map[i];
+        int n = points.size();
+        TGraph *g = new TGraph(n);
+        for(int j=0; j<n; j++){
+            g->SetPoint(j, points[j].first, points[j].second);
+        }
+        double chi2_min = min_chi2_map[i];
+        double gain_min = min_gain_map[i];
+        double fit_low = gain_min - fit_range;
+        double fit_high = gain_min + fit_range;
+        TF1 *fit = new TF1(Form("fit_om_%d",i),"pol2",fit_low, fit_high);
+        g->Fit(fit,"RQ");
+        TCanvas *c = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800,600);
+        g->SetMarkerStyle(20);
+        g->SetMarkerColor(kBlack);
+	//g->GetYaxis()->SetRangeUser(0, g->GetYaxis()->GetYmax());
+        g->Draw("AP");
+        fit->Draw("same");
+        c->SaveAs(Form("extract_values_png/om_%d.png",i));
+    }
+    fin->Close();
 }
+
 
 
 
@@ -265,16 +275,16 @@ int main(int argc, char** argv) {
   gSystem->Load("libCore");
   gSystem->Load("libRIO");
   int nb_gain_scan = 100; //number of gain you want to scan between 0.5 and 1.5
-  std::vector<TH1D*> data = create_data_spectrum();
-  cout<<"data spectrum created"<<endl;
+  // std::vector<TH1D*> data = create_data_spectrum();
+  // cout<<"data spectrum created"<<endl;
   //
   //simulation spectra stay the sames, if you want to re-create it uncomment this line
   //std::vector<std::vector<TH1D*>> simu = create_simu_spectrum(nb_gain_scan);
   //cout<<"simulation spectrum created "<<endl;
   //
-  fit_chi2_spectra(data, nb_gain_scan);
-  cout<<"data and simu chi2 fitted "<<endl;
-  extract_gain_values();
+  // fit_chi2_spectra(data, nb_gain_scan);
+  // cout<<"data and simu chi2 fitted "<<endl;
+  extract_gain_value();
   cout<<"gain values extracted "<<endl;
 
 }
