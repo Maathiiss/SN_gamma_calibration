@@ -210,47 +210,71 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
 
 
 void extract_gain_value(){
-    float fit_range = 0.1;
-    TFile *fin = TFile::Open("chi2_results.root", "READ");
-    TTree *tree = (TTree*)fin->Get("results");
-    int om;
-    double chi2, gain;
-    tree->SetBranchAddress("om", &om);
-    tree->SetBranchAddress("chi2", &chi2);
-    tree->SetBranchAddress("gain", &gain);
-    std::map<int, std::vector<std::pair<double,double>>> points_map;
-    std::map<int, double> min_chi2_map;
-    std::map<int, double> min_gain_map;
-    for(Long64_t i=0; i<tree->GetEntries(); ++i){
-        tree->GetEntry(i);
-        points_map[om].emplace_back(gain, chi2);
-        if(min_chi2_map.find(om) == min_chi2_map.end() || chi2 < min_chi2_map[om]){
-            min_chi2_map[om] = chi2;
-            min_gain_map[om] = gain;
-        }
+  float fit_range = 0.1;
+  TFile *fin = TFile::Open("chi2_results.root", "READ");
+  TTree *tree = (TTree*)fin->Get("results");
+  int om;
+  double chi2, chi2_square, gain;
+  tree->SetBranchAddress("om", &om);
+  tree->SetBranchAddress("chi2", &chi2);
+  tree->SetBranchAddress("chi2_square", &chi2_square);
+  tree->SetBranchAddress("gain", &gain);
+  std::map<int, std::vector<std::pair<double,double>>> points_map;
+  std::map<int, double> min_chi2_map;
+  std::map<int, double> min_gain_map;
+  for(Long64_t i=0; i<tree->GetEntries(); ++i){
+    tree->GetEntry(i);
+    if(chi2==0 || gain ==1 ) continue;
+    points_map[om].emplace_back(gain, chi2);
+    if(min_chi2_map.find(om) == min_chi2_map.end() || chi2 < min_chi2_map[om]){
+      min_chi2_map[om] = chi2;
+      min_gain_map[om] = gain;
     }
-    for(int i=0; i<712; i++){
-        auto &points = points_map[i];
-        int n = points.size();
-        TGraph *g = new TGraph(n);
-        for(int j=0; j<n; j++){
-            g->SetPoint(j, points[j].first, points[j].second);
-        }
-        double chi2_min = min_chi2_map[i];
-        double gain_min = min_gain_map[i];
-        double fit_low = gain_min - fit_range;
-        double fit_high = gain_min + fit_range;
-        TF1 *fit = new TF1(Form("fit_om_%d",i),"pol2",fit_low, fit_high);
-        g->Fit(fit,"RQ");
-        TCanvas *c = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800,600);
-        g->SetMarkerStyle(20);
-        g->SetMarkerColor(kBlack);
-	//g->GetYaxis()->SetRangeUser(0, g->GetYaxis()->GetYmax());
-        g->Draw("AP");
-        fit->Draw("same");
-        c->SaveAs(Form("extract_values_png/om_%d.png",i));
+  }
+  TFile *fout = new TFile("fit_results.root","RECREATE");
+  TTree *fitTree = new TTree("fitResults","Gain from fit");
+  int om_fit;
+  double gain_fit, chi2_fit, error_moins, error_plus, gain_fit_extrapolate;
+  fitTree->Branch("om",&om_fit);
+  fitTree->Branch("gain_fit",&gain_fit);
+  fitTree->Branch("chi2_fit",&chi2_fit);
+  fitTree->Branch("gain_fit_extrapolate",&gain_fit_extrapolate);
+  fitTree->Branch("error_moins",&error_moins);
+  fitTree->Branch("error_plus",&error_plus);
+
+  for(int i=0; i<712; i++){
+    auto &points = points_map[i];
+    int n = points.size();
+    TGraph *g = new TGraph(n);
+    for(int j=0; j<n; j++){
+      g->SetPoint(j, points[j].first, points[j].second);
     }
-    fin->Close();
+    double chi2_min = min_chi2_map[i];
+    double gain_min = min_gain_map[i];
+    double fit_low = gain_min - fit_range;
+    double fit_high = gain_min + fit_range;
+    TF1 *fit = new TF1(Form("fit_om_%d",i),"pol2",fit_low, fit_high);
+    g->Fit(fit,"RQ");
+    om_fit = i;
+    gain_fit_extrapolate = -fit->GetParameter(1)/(2*fit->GetParameter(2)); // min du pol2 : -b/(2a)  
+    // chi2_fit = fit->Eval(gain_fit);                                                               
+    chi2_square = fit->GetChisquare();
+    gain_fit = fit->GetMinimumX();
+    chi2_fit = fit->GetMinimum();
+    error_plus = fit->GetX(chi2_fit + 1, gain_fit, gain_fit + 0.05) - gain_fit;
+    error_moins = gain_fit - fit->GetX(chi2_fit + 1, gain_fit - 0.05, gain_fit);
+    fitTree->Fill();
+    TCanvas *c = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800,600);
+    g->SetMarkerStyle(20);
+    g->SetMarkerColor(kBlack);
+    g->Draw("AP");
+    fit->Draw("same");
+    c->SaveAs(Form("extract_values_png/om_%d.root",i));
+  }
+
+  fitTree->Write();
+  fout->Close();
+  fin->Close();
 }
 
 
@@ -274,16 +298,18 @@ int main(int argc, char** argv) {
   gSystem->Load("libThread");
   gSystem->Load("libCore");
   gSystem->Load("libRIO");
-  int nb_gain_scan = 100; //number of gain you want to scan between 0.5 and 1.5
-  // std::vector<TH1D*> data = create_data_spectrum();
-  // cout<<"data spectrum created"<<endl;
+  //
+  //first quick scan to get the minimum 
+  int nb_gain_scan = 30; //number of gain you want to scan between 0.5 and 1.5
+  std::vector<TH1D*> data = create_data_spectrum();
+  cout<<"data spectrum created"<<endl;
   //
   //simulation spectra stay the sames, if you want to re-create it uncomment this line
   //std::vector<std::vector<TH1D*>> simu = create_simu_spectrum(nb_gain_scan);
   //cout<<"simulation spectrum created "<<endl;
   //
-  // fit_chi2_spectra(data, nb_gain_scan);
-  // cout<<"data and simu chi2 fitted "<<endl;
+  fit_chi2_spectra(data, nb_gain_scan);
+  cout<<"data and simu chi2 fitted "<<endl;
   extract_gain_value();
   cout<<"gain values extracted "<<endl;
 
