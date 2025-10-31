@@ -42,7 +42,7 @@
 using namespace std;
 
 std::vector<TH1D*> create_data_spectrum(){
-  TFile* file = TFile::Open("crop_file.root");
+  TFile* file = TFile::Open("/sps/nemo/scratch/granjon/full_gain_analysis/gamma_calib/root_with_e_cut/crop_file.root");
   TTree* tree = (TTree*)file->Get("Event");
   vector<double>* charge_gamma_finale = nullptr;
   vector<double>* dt_gamma_elec_real_E = nullptr;
@@ -71,10 +71,16 @@ std::vector<TH1D*> create_data_spectrum(){
 
 
 
-std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values){
-  TFile *fout = new TFile("save_simu_spectra.root", "RECREATE");
-
+std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values, bool first_time, std::map<int,double>* best_gain_per_om ){
+  TFile *fout = nullptr;  
+  if(first_time==true){
+    fout = new TFile("save_simu_spectra_unprecise.root", "RECREATE");
+  }
+  else{
+    fout = new TFile("save_simu_spectra_precise.root", "RECREATE");
+  }
   TFile* file = TFile::Open("/sps/nemo/scratch/granjon/magnetic_field/1e_simu/simu_xalbat/calib_gamma/files_root/crop_tot.root");
+  //TFile* file = TFile::Open("../extracted_data.root");
   TTree* tree = (TTree*)file->Get("Event");
   vector<double>* total_energy_gamma = nullptr;
   vector<double>* gamma_evis = nullptr;
@@ -84,7 +90,6 @@ std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values){
   tree->SetBranchAddress("gamma_evis", &gamma_evis);  
   tree->SetBranchStatus("num_om_gamma_f",1);
   tree->SetBranchAddress("num_om_gamma_f", &num_om_gamma_f);
-      
   
   std::vector<std::vector<TH1D*>> histo_simu(712);
   for(int i=0; i<712; i++){
@@ -97,8 +102,16 @@ std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values){
     tree->GetEntry(entry);
     for(size_t k=0; k<gamma_evis->size(); k++){      
       for (int i = 0; i < nb_gain_values; i++) {
-	float gain = 0.5 + i * (1.0 / nb_gain_values);
-	//if(gamma_evis->at(k)*gain<0.15) continue;
+	float gain = 0;
+	if(first_time==true){ // we want values bewtween 0.2 and 2 
+	  gain = 0.2 + 1.8 * i * (1.0 / nb_gain_values);
+	}
+	else{ // the 0.2 is here to go under 0.2 the minimum to fit chi2 curve
+	  //0.2 si the range around the minimum to compute
+	  float range = 0.2;
+	  auto it = best_gain_per_om->find(num_om_gamma_f->at(k));
+	  gain = it->second - range + i * (2.0*range / nb_gain_values);
+	}
  	histo_simu[num_om_gamma_f->at(k)][i]->Fill(gamma_evis->at(k)*gain);
       }
     }
@@ -116,8 +129,15 @@ std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values){
 
 
 
-void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
- TFile *fout = new TFile("chi2_results.root", "RECREATE");
+void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values, bool precise, std::map<int, double> &chi2_min_per_om, std::map<int, double>& best_gain_per_om){
+  
+  TFile *fout = nullptr;
+  if(precise) {
+  fout = new TFile("chi2_results_precise.root", "RECREATE");
+  }
+  else{
+    fout = new TFile("chi2_results_unprecise.root", "RECREATE");
+  }
   TTree *tree = new TTree("results", "Chi2 comparison results");
   int om=0;
   double chi2=0.0, gain=0.0, hand_chi2=0.0, bin_chi2=0.0;
@@ -128,11 +148,20 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
   tree->Branch("hand_chi2", &hand_chi2);
   tree->Branch("bin_chi2", &bin_chi2);
   tree->Branch("gain", &gain);
-
-  TFile *f = TFile::Open("save_simu_spectra.root");
-
+  TFile *f = nullptr;
+  if(precise) {
+    f = TFile::Open("save_simu_spectra_precise.root");  
+  }
+  else{
+    f = TFile::Open("save_simu_spectra_unprecise.root");
+  }
+  
   for (int i = 0; i < 712; i++) {// loop on OMs
     om = i;
+    if(precise==false) {
+      chi2_min_per_om[i] = 1e12;
+      best_gain_per_om[i] = 0.0;
+    }
     TH1D* h_ref = data[i];
     if (!h_ref) continue;
     if(h_ref->GetEntries() == 0) continue;
@@ -150,7 +179,12 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
       chi2=0.0;
       hand_chi2=0.0;
       bin_chi2=0.0;
-      gain = 0.5+1.0*j/nb_gain_values;
+      if(precise == false){
+	gain = 0.2 + 1.8 * j * (1.0 / nb_gain_values);
+      }
+      else{
+	gain = best_gain_per_om[i] - 0.2 + j * (2.0*0.2 / nb_gain_values);
+      }
       TH1D* h_simu = (TH1D*)f->Get(Form("om_%d_gain_%d", i, j));
       if (!h_simu) continue;
       int data_entries = h_ref->GetEntries();
@@ -187,17 +221,29 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
 	}
       }
       chi2 = h_ref1->Chi2Test(h_simu_chi2, "CHI2 UU");
-      //Draw part
-      // if(i<10){
-      // 	TCanvas* canvas = new TCanvas();
-      // 	canvas->cd();
-      // 	h_ref1->SetLineColor(kRed);
-      // 	h_ref1->Draw();
-      // 	h_simu_chi2->SetLineColor(kBlue);
-      // 	h_simu_chi2->Draw("same");
-      // 	canvas->SetLogy();
-      // 	canvas->SaveAs(Form("png_fit_save/om_%d_gain_%f.png",i,gain));
-      // }
+      if(precise==false){ 	
+	if (chi2 < chi2_min_per_om[om]) {
+	  chi2_min_per_om[om] = chi2;
+	  best_gain_per_om[om] = gain;
+	}
+      }
+      
+    //Draw part
+      if(i<10){
+      	TCanvas* canvas = new TCanvas();
+      	canvas->cd();
+      	h_ref1->SetLineColor(kRed);
+      	h_ref1->Draw();
+      	h_simu_chi2->SetLineColor(kBlue);
+      	h_simu_chi2->Draw("same");
+      	canvas->SetLogy();
+	if(precise==false){
+	  canvas->SaveAs(Form("unprecise_png/om_%d_gain_%f.png",i,gain));
+	}
+	else{
+	  canvas->SaveAs(Form("precise_png/om_%d_gain_%f.png",i,gain));
+	}
+      }
       tree->Fill();
       delete h_simu_chi2;
     }//end j simu gain                                                                               
@@ -209,75 +255,136 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values){
 }
 
 
+
+
 void extract_gain_value(){
   float fit_range = 0.1;
-  TFile *fin = TFile::Open("chi2_results.root", "READ");
-  TTree *tree = (TTree*)fin->Get("results");
+
+  // --- fichiers precise et unprecise ---
+  TFile *fin_precise = TFile::Open("chi2_results_precise.root", "READ");
+  TTree *tree_precise = (TTree*)fin_precise->Get("results");
+  TFile *fin_unprecise = TFile::Open("chi2_results_unprecise.root", "READ");
+  TTree *tree_unprecise = (TTree*)fin_unprecise->Get("results");
+
   int om;
-  double chi2, chi2_square, gain;
-  tree->SetBranchAddress("om", &om);
-  tree->SetBranchAddress("chi2", &chi2);
-  tree->SetBranchAddress("chi2_square", &chi2_square);
-  tree->SetBranchAddress("gain", &gain);
-  std::map<int, std::vector<std::pair<double,double>>> points_map;
-  std::map<int, double> min_chi2_map;
-  std::map<int, double> min_gain_map;
-  for(Long64_t i=0; i<tree->GetEntries(); ++i){
-    tree->GetEntry(i);
-    if(chi2==0 || gain ==1 ) continue;
-    points_map[om].emplace_back(gain, chi2);
-    if(min_chi2_map.find(om) == min_chi2_map.end() || chi2 < min_chi2_map[om]){
-      min_chi2_map[om] = chi2;
-      min_gain_map[om] = gain;
-    }
+  double chi2, gain;
+
+  // --- maps pour stocker points ---
+  std::map<int, std::vector<std::pair<double,double>>> points_map_precise;
+  std::map<int, std::vector<std::pair<double,double>>> points_map_unprecise;
+
+  // --- lecture precise ---
+  tree_precise->SetBranchAddress("om", &om);
+  tree_precise->SetBranchAddress("chi2", &chi2);
+  tree_precise->SetBranchAddress("gain", &gain);
+  for(Long64_t i=0; i<tree_precise->GetEntries(); ++i){
+    tree_precise->GetEntry(i);
+    if(chi2==0 || gain==1) continue;
+    points_map_precise[om].emplace_back(gain, chi2);
   }
+
+  // --- lecture unprecise ---
+  tree_unprecise->SetBranchAddress("om", &om);
+  tree_unprecise->SetBranchAddress("chi2", &chi2);
+  tree_unprecise->SetBranchAddress("gain", &gain);
+  for(Long64_t i=0; i<tree_unprecise->GetEntries(); ++i){
+    tree_unprecise->GetEntry(i);
+    if(chi2==0 || gain==1) continue;
+    points_map_unprecise[om].emplace_back(gain, chi2);
+  }
+
+  // --- fichier de sortie ---
   TFile *fout = new TFile("fit_results.root","RECREATE");
   TTree *fitTree = new TTree("fitResults","Gain from fit");
   int om_fit;
   double gain_fit, chi2_fit, error_moins, error_plus, gain_fit_extrapolate;
   fitTree->Branch("om",&om_fit);
   fitTree->Branch("gain_fit",&gain_fit);
-  fitTree->Branch("chi2_fit",&chi2_fit);
+  fitTree->Branch("chi2_fit",&chi2_fit);  
   fitTree->Branch("gain_fit_extrapolate",&gain_fit_extrapolate);
   fitTree->Branch("error_moins",&error_moins);
   fitTree->Branch("error_plus",&error_plus);
 
   for(int i=0; i<712; i++){
-    auto &points = points_map[i];
-    int n = points.size();
-    TGraph *g = new TGraph(n);
-    for(int j=0; j<n; j++){
-      g->SetPoint(j, points[j].first, points[j].second);
+    auto &points_p = points_map_precise[i];
+    auto &points_u = points_map_unprecise[i];
+    int n_p = points_p.size();
+    int n_u = points_u.size();
+    if(n_p==0 && n_u==0) continue;
+    TCanvas *c = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800, 600);
+    c->cd();
+
+    // --- Graphe precise ---
+    TGraph *g_p = nullptr;
+    if(n_p > 0){
+      g_p = new TGraph(n_p);
+      for(int j=0;j<n_p;j++)
+        g_p->SetPoint(j, points_p[j].first, points_p[j].second);
+      g_p->SetMarkerStyle(20);
+      g_p->SetMarkerColor(kGreen+2);
+      g_p->SetLineColor(kGreen+2);
+      g_p->SetTitle(Form("OM %d;Gain;#chi^{2}", i)); // titre + labels axes
+      g_p->Draw("AP");
     }
-    double chi2_min = min_chi2_map[i];
-    double gain_min = min_gain_map[i];
-    double fit_low = gain_min - fit_range;
-    double fit_high = gain_min + fit_range;
-    TF1 *fit = new TF1(Form("fit_om_%d",i),"pol2",fit_low, fit_high);
-    g->Fit(fit,"RQ");
-    om_fit = i;
-    gain_fit_extrapolate = -fit->GetParameter(1)/(2*fit->GetParameter(2)); // min du pol2 : -b/(2a)  
-    // chi2_fit = fit->Eval(gain_fit);                                                               
-    chi2_square = fit->GetChisquare();
-    gain_fit = fit->GetMinimumX();
-    chi2_fit = fit->GetMinimum();
-    error_plus = fit->GetX(chi2_fit + 1, gain_fit, gain_fit + 0.05) - gain_fit;
-    error_moins = gain_fit - fit->GetX(chi2_fit + 1, gain_fit - 0.05, gain_fit);
-    fitTree->Fill();
-    TCanvas *c = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800,600);
-    g->SetMarkerStyle(20);
-    g->SetMarkerColor(kBlack);
-    g->Draw("AP");
-    fit->Draw("same");
-    c->SaveAs(Form("extract_values_png/om_%d.root",i));
+
+    // --- Graphe unprecise ---
+    TGraph *g_u = nullptr;
+    if(n_u > 0){
+      g_u = new TGraph(n_u);
+      for(int j=0;j<n_u;j++)
+        g_u->SetPoint(j, points_u[j].first, points_u[j].second);
+      g_u->SetMarkerStyle(21);
+      g_u->SetMarkerColor(kRed);
+      g_u->SetLineColor(kRed);
+      g_u->Draw(n_p>0 ? "P SAME" : "AP");
+    }
+
+    // --- Fit sur precise ---
+    if(n_p > 0){
+      double chi2_min = points_p[0].second;
+      double gain_min = points_p[0].first;
+      for(auto &pt : points_p){
+        if(pt.second < chi2_min){
+	  chi2_min = pt.second;
+	  gain_min = pt.first;
+        }
+      }
+      TF1 *fit = new TF1(Form("fit_om_%d",i),"pol2",gain_min-fit_range,gain_min+fit_range);
+      g_p->Fit(fit,"RQ");
+      fit->SetLineColor(kBlue);
+      fit->SetLineWidth(2);
+      fit->Draw("same");
+
+      om_fit = i;
+      gain_fit_extrapolate = -fit->GetParameter(1)/(2*fit->GetParameter(2));
+      gain_fit = fit->GetMinimumX();
+      chi2_fit = fit->GetMinimum();
+      error_plus = fit->GetX(chi2_fit+1,gain_fit,gain_fit+0.05) - gain_fit;
+      error_moins = gain_fit - fit->GetX(chi2_fit+1,gain_fit-0.05,gain_fit);
+      fitTree->Fill();
+    }
+
+    // --- Légende ---
+    TLegend *leg = new TLegend(0.6, 0.7, 0.88, 0.88);
+    leg->SetBorderSize(0);
+    leg->SetFillStyle(0);
+    leg->SetTextSize(0.03);
+    if(g_u) leg->AddEntry(g_u, "General scan", "p");
+    if(g_p) leg->AddEntry(g_p, "Precise scan", "p");
+    if(n_p > 0) leg->AddEntry((TObject*)gROOT->FindObject(Form("fit_om_%d",i)), "Quadratic fit", "l");
+    leg->Draw("same");
+
+    c->SetGrid();
+    c->SetTicks();
+    c->SaveAs(Form("extract_values_png/om_%d.png", i));
+
   }
 
   fitTree->Write();
   fout->Close();
-  fin->Close();
+  fin_precise->Close();
+  fin_unprecise->Close();
 }
-
-
 
 
 
@@ -298,19 +405,34 @@ int main(int argc, char** argv) {
   gSystem->Load("libThread");
   gSystem->Load("libCore");
   gSystem->Load("libRIO");
-  //
-  //first quick scan to get the minimum 
-  int nb_gain_scan = 30; //number of gain you want to scan between 0.5 and 1.5
+  //****************************************************************************************************
+  //***********************first quick scan to get the minimum******************************************
+  //****************************************************************************************************
+  std::map<int, double> best_gain_per_om;
+  std::map<int, double> chi2_min_per_om;
+  int nb_gain_scan = 30; //number of gain you want to scan between 0.2 and 2
   std::vector<TH1D*> data = create_data_spectrum();
   cout<<"data spectrum created"<<endl;
   //
   //simulation spectra stay the sames, if you want to re-create it uncomment this line
-  //std::vector<std::vector<TH1D*>> simu = create_simu_spectrum(nb_gain_scan);
-  //cout<<"simulation spectrum created "<<endl;
+   std::vector<std::vector<TH1D*>> simu = create_simu_spectrum(nb_gain_scan, true, &best_gain_per_om);
+   cout<<"simulation spectrum created "<<endl;
   //
-  fit_chi2_spectra(data, nb_gain_scan);
+   fit_chi2_spectra(data, nb_gain_scan, false, chi2_min_per_om, best_gain_per_om);
+   cout<<"data and simu chi2 fitted "<<endl;
+  //****************************************************************************************************
+  //*****************************detailed scan to get the precise minimum*******************************
+  //****************************************************************************************************
+  //
+  //simulation spectra stay the sames, if you want to re-create it uncomment this line
+   int nb_gain_precise = 100;
+  std::vector<std::vector<TH1D*>> simu_precise = create_simu_spectrum(nb_gain_precise,false,&best_gain_per_om);
+   cout<<"simulation spectrum created "<<endl;
+   //
+  fit_chi2_spectra(data, nb_gain_scan, true, chi2_min_per_om, best_gain_per_om);
   cout<<"data and simu chi2 fitted "<<endl;
+
   extract_gain_value();
   cout<<"gain values extracted "<<endl;
-
+ 
 }
