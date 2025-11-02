@@ -106,9 +106,9 @@ std::vector<std::vector<TH1D*>> create_simu_spectrum(int nb_gain_values, bool fi
 	if(first_time==true){ // we want values bewtween 0.2 and 2 
 	  gain = 0.2 + 1.8 * i * (1.0 / nb_gain_values);
 	}
-	else{ // the 0.2 is here to go under 0.2 the minimum to fit chi2 curve
-	  //0.2 si the range around the minimum to compute
-	  float range = 0.2;
+	else{ // the range is here to go range under the minimum to fit chi2 curve
+	  //the range is around the minimum to compute
+	  float range = 0.1;
 	  auto it = best_gain_per_om->find(num_om_gamma_f->at(k));
 	  gain = it->second - range + i * (2.0*range / nb_gain_values);
 	}
@@ -183,7 +183,7 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values, bool precise,
 	gain = 0.2 + 1.8 * j * (1.0 / nb_gain_values);
       }
       else{
-	gain = best_gain_per_om[i] - 0.2 + j * (2.0*0.2 / nb_gain_values);
+	gain = best_gain_per_om[i] - 0.1 + j * (2.0*0.1 / nb_gain_values);
       }
       TH1D* h_simu = (TH1D*)f->Get(Form("om_%d_gain_%d", i, j));
       if (!h_simu) continue;
@@ -258,7 +258,7 @@ void fit_chi2_spectra(std::vector<TH1D*> data, int nb_gain_values, bool precise,
 
 
 void extract_gain_value(){
-  float fit_range = 0.1;
+  float fit_range = 0.05;
 
   // --- fichiers precise et unprecise ---
   TFile *fin_precise = TFile::Open("chi2_results_precise.root", "READ");
@@ -279,7 +279,6 @@ void extract_gain_value(){
   tree_precise->SetBranchAddress("gain", &gain);
   for(Long64_t i=0; i<tree_precise->GetEntries(); ++i){
     tree_precise->GetEntry(i);
-    if(chi2==0 || gain==1) continue;
     points_map_precise[om].emplace_back(gain, chi2);
   }
 
@@ -289,7 +288,6 @@ void extract_gain_value(){
   tree_unprecise->SetBranchAddress("gain", &gain);
   for(Long64_t i=0; i<tree_unprecise->GetEntries(); ++i){
     tree_unprecise->GetEntry(i);
-    if(chi2==0 || gain==1) continue;
     points_map_unprecise[om].emplace_back(gain, chi2);
   }
 
@@ -373,9 +371,10 @@ void extract_gain_value(){
     if(g_p) leg->AddEntry(g_p, "Precise scan", "p");
     if(n_p > 0) leg->AddEntry((TObject*)gROOT->FindObject(Form("fit_om_%d",i)), "Quadratic fit", "l");
     leg->Draw("same");
-
+    if(g_u) g_u->GetXaxis()->SetRangeUser(0.2, 2);
     c->SetGrid();
     c->SetTicks();
+    c->SaveAs(Form("extract_values_png/om_%d.root", i));
     c->SaveAs(Form("extract_values_png/om_%d.png", i));
 
   }
@@ -429,7 +428,7 @@ int main(int argc, char** argv) {
   std::vector<std::vector<TH1D*>> simu_precise = create_simu_spectrum(nb_gain_precise,false,&best_gain_per_om);
    cout<<"simulation spectrum created "<<endl;
    //
-  fit_chi2_spectra(data, nb_gain_scan, true, chi2_min_per_om, best_gain_per_om);
+  fit_chi2_spectra(data, nb_gain_precise, true, chi2_min_per_om, best_gain_per_om);
   cout<<"data and simu chi2 fitted "<<endl;
 
   extract_gain_value();
