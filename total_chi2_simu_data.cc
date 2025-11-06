@@ -312,31 +312,31 @@ void extract_gain_value(){
     TCanvas *c = new TCanvas(Form("om_%d",i), Form("OM %d",i), 800, 600);
     c->cd();
 
-    // --- Graphe precise ---
-    TGraph *g_p = nullptr;
-    if(n_p > 0){
-      g_p = new TGraph(n_p);
-      for(int j=0;j<n_p;j++)
-        g_p->SetPoint(j, points_p[j].first, points_p[j].second);
-      g_p->SetMarkerStyle(20);
-      g_p->SetMarkerColor(kGreen+2);
-      g_p->SetLineColor(kGreen+2);
-      g_p->SetTitle(Form("OM %d;Gain;#chi^{2}", i)); // titre + labels axes
-      g_p->Draw("AP");
-    }
-
-    // --- Graphe unprecise ---
+    // --- Graphe unprecise ---                                                                         
     TGraph *g_u = nullptr;
-    if(n_u > 0){
+    if (n_u > 0) {
       g_u = new TGraph(n_u);
-      for(int j=0;j<n_u;j++)
-        g_u->SetPoint(j, points_u[j].first, points_u[j].second);
+      for (int j = 0; j < n_u; j++)
+	g_u->SetPoint(j, points_u[j].first, points_u[j].second);
       g_u->SetMarkerStyle(21);
       g_u->SetMarkerColor(kRed);
       g_u->SetLineColor(kRed);
-      g_u->Draw(n_p>0 ? "P SAME" : "AP");
+      g_u->SetTitle(Form("OM %d;Gain;#chi^{2}", i)); // titre + labels axes
+      g_u->Draw("AP");
     }
 
+    // --- Graphe precise ---                                                                           
+    TGraph *g_p = nullptr;
+    if (n_p > 0) {
+      g_p = new TGraph(n_p);
+      for (int j = 0; j < n_p; j++)
+	g_p->SetPoint(j, points_p[j].first, points_p[j].second);
+      g_p->SetMarkerStyle(20);
+      g_p->SetMarkerColor(kGreen + 2);
+      g_p->SetLineColor(kGreen + 2);
+      g_p->Draw(n_u > 0 ? "P SAME" : "AP");
+    }
+    
     // --- Fit sur precise ---
     if(n_p > 0){
       double chi2_min = points_p[0].second;
@@ -406,30 +406,30 @@ int main(int argc, char** argv) {
   gSystem->Load("libRIO");
   //****************************************************************************************************
   //***********************first quick scan to get the minimum******************************************
-  //****************************************************************************************************
-  std::map<int, double> best_gain_per_om;
-  std::map<int, double> chi2_min_per_om;
-  int nb_gain_scan = 30; //number of gain you want to scan between 0.2 and 2
-  std::vector<TH1D*> data = create_data_spectrum();
-  cout<<"data spectrum created"<<endl;
-  //
-  //simulation spectra stay the sames, if you want to re-create it uncomment this line
-   std::vector<std::vector<TH1D*>> simu = create_simu_spectrum(nb_gain_scan, true, &best_gain_per_om);
-   cout<<"simulation spectrum created "<<endl;
-  //
-   fit_chi2_spectra(data, nb_gain_scan, false, chi2_min_per_om, best_gain_per_om);
-   cout<<"data and simu chi2 fitted "<<endl;
-  //****************************************************************************************************
-  //*****************************detailed scan to get the precise minimum*******************************
-  //****************************************************************************************************
-  //
-  //simulation spectra stay the sames, if you want to re-create it uncomment this line
-   int nb_gain_precise = 100;
-  std::vector<std::vector<TH1D*>> simu_precise = create_simu_spectrum(nb_gain_precise,false,&best_gain_per_om);
-   cout<<"simulation spectrum created "<<endl;
-   //
-  fit_chi2_spectra(data, nb_gain_precise, true, chi2_min_per_om, best_gain_per_om);
-  cout<<"data and simu chi2 fitted "<<endl;
+  // //************************************************************************************************* ***
+  // std::map<int, double> best_gain_per_om;
+  // std::map<int, double> chi2_min_per_om;
+  // int nb_gain_scan = 30; //number of gain you want to scan between 0.2 and 2
+  // std::vector<TH1D*> data = create_data_spectrum();
+  // cout<<"data spectrum created"<<endl;
+  // //
+  // //simulation spectra stay the sames, if you want to re-create it uncomment this line
+  //  std::vector<std::vector<TH1D*>> simu = create_simu_spectrum(nb_gain_scan, true, &best_gain_per_om);
+  //  cout<<"simulation spectrum created "<<endl;
+  // //
+  //  fit_chi2_spectra(data, nb_gain_scan, false, chi2_min_per_om, best_gain_per_om);
+  //  cout<<"data and simu chi2 fitted "<<endl;
+  // //****************************************************************************************************
+  // //*****************************detailed scan to get the precise minimum*******************************
+  // //****************************************************************************************************
+  // //
+  // //simulation spectra stay the sames, if you want to re-create it uncomment this line
+  //  int nb_gain_precise = 100;
+  // std::vector<std::vector<TH1D*>> simu_precise = create_simu_spectrum(nb_gain_precise,false,&best_gain_per_om);
+  //  cout<<"simulation spectrum created "<<endl;
+  //  //
+  // fit_chi2_spectra(data, nb_gain_precise, true, chi2_min_per_om, best_gain_per_om);
+  // cout<<"data and simu chi2 fitted "<<endl;
 
   extract_gain_value();
   cout<<"gain values extracted "<<endl;
